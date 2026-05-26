@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-05-26T07:47:34.442956",
+  "cities": [
+    {
+      "City": "Delhi",
+      "annual_avg_aqi": 181.4,
+      "total_poor_days": 133
+    },
+    {
+      "City": "Lucknow",
+      "annual_avg_aqi": 158.4,
+      "total_poor_days": 71
+    },
+    {
+      "City": "Kolkata",
+      "annual_avg_aqi": 140.5,
+      "total_poor_days": 37
+    },
+    {
+      "City": "Ahmedabad",
+      "annual_avg_aqi": 116.8,
+      "total_poor_days": 2
+    },
+    {
+      "City": "Jaipur",
+      "annual_avg_aqi": 107.8,
+      "total_poor_days": 1
+    },
+    {
+      "City": "Mumbai",
+      "annual_avg_aqi": 95.4,
+      "total_poor_days": 0
+    },
+    {
+      "City": "Chennai",
+      "annual_avg_aqi": 88.0,
+      "total_poor_days": 0
+    },
+    {
+      "City": "Hyderabad",
+      "annual_avg_aqi": 85.8,
+      "total_poor_days": 0
+    },
+    {
+      "City": "Pune",
+      "annual_avg_aqi": 79.0,
+      "total_poor_days": 0
+    },
+    {
+      "City": "Bengaluru",
+      "annual_avg_aqi": 73.2,
+      "total_poor_days": 0
+    }
+  ]
+}
