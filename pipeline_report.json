@@ -1,0 +1,26 @@
+{
+  "pipeline": "india-aqi-etl",
+  "run_date": "2026-05-27 06:59",
+  "status": "SUCCESS",
+  "stats": {
+    "total_rows": 3650,
+    "cities": 10,
+    "date_range": "2023-01-01 00:00:00 \u2192 2023-12-31 00:00:00",
+    "nulls_fixed": 188,
+    "dq_score_pct": 100.0
+  },
+  "top3_polluted": [
+    {
+      "City": "Delhi",
+      "annual_avg_aqi": 181.4
+    },
+    {
+      "City": "Lucknow",
+      "annual_avg_aqi": 158.4
+    },
+    {
+      "City": "Kolkata",
+      "annual_avg_aqi": 140.5
+    }
+  ]
+}
