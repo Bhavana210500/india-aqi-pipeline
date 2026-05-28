@@ -1,13 +1,14 @@
 """
 Week 1 — India Air Quality ETL Pipeline
-Day 3: LAG/LEAD, Rolling averages, CTEs, Data Quality report, Pipeline report
+Day 4: PIVOT, NTILE, Self JOIN, pandas merge, multi-format export
 
-Stack : pandas + SQLite (zero cloud, zero cost)
+Stack : pandas + SQLite
 Run   : python etl_pipeline.py
 
 Day 1: extract → transform → load → basic queries
-Day 2: seasonal analysis, window functions (RANK, ROW_NUMBER), JSON export
-Day 3: LAG/LEAD trend, rolling avg, CTEs, data quality checks, pipeline report
+Day 2: seasonal analysis, RANK, ROW_NUMBER window functions, JSON export
+Day 3: LAG/LEAD, rolling avg, CTE, data quality report, pipeline report JSON
+Day 4: PIVOT (CASE WHEN), NTILE quartiles, Self JOIN, pandas merge, Parquet export
 """
 import pandas as pd
 import sqlite3
@@ -23,27 +24,23 @@ logging.basicConfig(
 
 
 # ── EXTRACT ───────────────────────────────────────────────────────────────────
-def extract(filepath: str) -> pd.DataFrame:
-    """Read raw CSV. Capture null count BEFORE cleaning — needed for DQ report."""
+def extract(filepath: str):
     logging.info(f"EXTRACT  reading {filepath}")
     df = pd.read_csv(filepath, parse_dates=['Date'])
     nulls = int(df['AQI'].isna().sum())
     dupes = int(df.duplicated(subset=['City', 'Date']).sum())
     logging.info(f"EXTRACT  shape={df.shape}  nulls={nulls}  dupes={dupes}")
-    return df, nulls, dupes          # return nulls & dupes for DQ report
+    return df, nulls, dupes
 
 
 # ── TRANSFORM ─────────────────────────────────────────────────────────────────
 def transform(df: pd.DataFrame):
-    """Clean, enrich, and aggregate."""
     logging.info("TRANSFORM  starting")
 
-    # 1. Null fix — city-specific median
     df['AQI'] = df['AQI'].fillna(
         df.groupby('City')['AQI'].transform('median')
     )
 
-    # 2. AQI Category (CPCB scale)
     def aqi_category(aqi):
         if   aqi <= 50:  return 'Good'
         elif aqi <= 100: return 'Satisfactory'
@@ -52,257 +49,226 @@ def transform(df: pd.DataFrame):
         else:            return 'Severe'
 
     df['AQI_Category'] = df['AQI'].apply(aqi_category)
-
-    # 3. Time dimensions
     df['Month']  = df['Date'].dt.month
     df['Year']   = df['Date'].dt.year
     df['Season'] = df['Month'].map({
-        12: 'Winter',  1: 'Winter',  2: 'Winter',
-         3: 'Spring',  4: 'Spring',  5: 'Spring',
-         6: 'Monsoon', 7: 'Monsoon', 8: 'Monsoon',
-         9: 'Post-Monsoon', 10: 'Post-Monsoon', 11: 'Post-Monsoon',
+        12:'Winter', 1:'Winter',  2:'Winter',
+         3:'Spring', 4:'Spring',  5:'Spring',
+         6:'Monsoon',7:'Monsoon', 8:'Monsoon',
+         9:'Post-Monsoon',10:'Post-Monsoon',11:'Post-Monsoon',
     })
 
-    # 4. Monthly aggregation
     monthly = (
-        df.groupby(['City', 'Year', 'Month', 'Season'])
-          .agg(
-              avg_aqi   = ('AQI',   'mean'),
-              max_aqi   = ('AQI',   'max'),
-              min_aqi   = ('AQI',   'min'),
-              days_poor = ('AQI',   lambda x: (x > 200).sum()),
-              avg_pm25  = ('PM2.5', 'mean'),
-          )
-          .round(2)
-          .reset_index()
+        df.groupby(['City','Year','Month','Season'])
+          .agg(avg_aqi=('AQI','mean'), max_aqi=('AQI','max'),
+               min_aqi=('AQI','min'),
+               days_poor=('AQI', lambda x:(x>200).sum()),
+               avg_pm25=('PM2.5','mean'))
+          .round(2).reset_index()
     )
-
-    # 5. NEW DAY 3 — rolling 3-month avg per city using pandas
-    #    Pandas rolling is easier than SQL for sliding windows
-    monthly = monthly.sort_values(['City', 'Month'])
+    monthly = monthly.sort_values(['City','Month'])
     monthly['rolling_3m_aqi'] = (
         monthly.groupby('City')['avg_aqi']
-               .transform(lambda x: x.rolling(window=3, min_periods=1).mean())
+               .transform(lambda x: x.rolling(3, min_periods=1).mean())
                .round(2)
     )
-
-    logging.info(f"TRANSFORM  monthly rows={len(monthly)}  rolling_3m added")
+    logging.info(f"TRANSFORM  monthly rows={len(monthly)}")
     return df, monthly
 
 
 # ── LOAD ──────────────────────────────────────────────────────────────────────
-def load(raw_df: pd.DataFrame, monthly_df: pd.DataFrame, db_path: str):
-    """Write tables and views to SQLite."""
+def load(raw_df, monthly_df, db_path):
     logging.info(f"LOAD  writing to {db_path}")
     conn = sqlite3.connect(db_path)
-
-    raw_df.to_sql('raw_aqi',         conn, if_exists='replace', index=False)
+    raw_df.to_sql('raw_aqi',      conn, if_exists='replace', index=False)
     monthly_df.to_sql('monthly_aqi', conn, if_exists='replace', index=False)
-
     conn.execute("DROP VIEW IF EXISTS city_annual")
     conn.execute("""
         CREATE VIEW city_annual AS
         SELECT City, Year,
-               ROUND(AVG(avg_aqi), 1) AS annual_avg_aqi,
-               SUM(days_poor)         AS total_poor_days
-        FROM   monthly_aqi
-        GROUP  BY City, Year
+               ROUND(AVG(avg_aqi),1) AS annual_avg_aqi,
+               SUM(days_poor)        AS total_poor_days
+        FROM   monthly_aqi GROUP BY City, Year
     """)
-
     conn.commit()
     conn.close()
-    logging.info(f"LOAD  raw_aqi({len(raw_df)})  monthly_aqi({len(monthly_df)})")
+    logging.info(f"LOAD  raw_aqi({len(raw_df)}) monthly_aqi({len(monthly_df)})")
 
 
-# ── VERIFY DAY 1 ──────────────────────────────────────────────────────────────
-def verify_day1(conn):
-    print("\n" + "="*58)
-    print("  TOP 10 CITIES BY ANNUAL AQI")
-    print("="*58)
+# ── VERIFY DAYS 1-3 (condensed) ───────────────────────────────────────────────
+def verify_days_1_to_3(conn):
+    print("\n" + "="*60)
+    print("  DAYS 1-3 — QUICK RECAP")
+    print("="*60)
     print(pd.read_sql("""
         SELECT City, annual_avg_aqi, total_poor_days
         FROM   city_annual ORDER BY annual_avg_aqi DESC
     """, conn).to_string(index=False))
 
-    print("\n" + "="*58)
-    print("  AQI CATEGORY DISTRIBUTION")
-    print("="*58)
-    print(pd.read_sql("""
-        SELECT AQI_Category, COUNT(*) AS days
-        FROM   raw_aqi
-        GROUP  BY AQI_Category ORDER BY days DESC
-    """, conn).to_string(index=False))
 
+# ── VERIFY DAY 4 — NEW ────────────────────────────────────────────────────────
+def verify_day4(conn, raw_df):
 
-# ── VERIFY DAY 2 ──────────────────────────────────────────────────────────────
-def verify_day2(conn):
-    print("\n" + "="*58)
-    print("  WORST SEASON BY AQI")
-    print("="*58)
-    print(pd.read_sql("""
-        SELECT Season,
-               ROUND(AVG(avg_aqi), 1) AS season_avg_aqi,
-               SUM(days_poor)         AS total_poor_days
-        FROM   monthly_aqi
-        GROUP  BY Season ORDER BY season_avg_aqi DESC
-    """, conn).to_string(index=False))
-
-    print("\n" + "="*58)
-    print("  WORST MONTH PER CITY  (ROW_NUMBER PARTITION BY)")
-    print("="*58)
-    print(pd.read_sql("""
-        SELECT City, Month, Season, avg_aqi FROM (
-            SELECT City, Month, Season, avg_aqi,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY City ORDER BY avg_aqi DESC
-                   ) AS rn
-            FROM monthly_aqi
-        ) WHERE rn = 1 ORDER BY avg_aqi DESC
-    """, conn).to_string(index=False))
-
-
-# ── VERIFY DAY 3 — NEW ────────────────────────────────────────────────────────
-def verify_day3(conn, raw_df, nulls_before, dupes_before):
-
-    # ── Query 1: LAG — month-over-month change ────────────────────────────────
-    # LAG() looks at the PREVIOUS row's value
-    # Use case: detect sudden AQI spikes month-on-month
-    print("\n" + "="*58)
-    print("  LAG — MONTH-OVER-MONTH AQI CHANGE (Delhi)")
-    print("  Pattern: LAG(col) OVER (PARTITION BY City ORDER BY Month)")
-    print("="*58)
+    # ── Query 1: PIVOT using CASE WHEN ───────────────────────────────────────
+    # Pivot = rotate rows into columns. Makes data human-readable.
+    # Real use: monthly/seasonal dashboards, Excel-style reports from SQL
+    # Mainframe parallel: COBOL EVALUATE WHEN → branch by season value
+    print("\n" + "="*60)
+    print("  PIVOT — AQI BY SEASON PER CITY  (CASE WHEN)")
+    print("  Pattern: AVG(CASE WHEN col='val' THEN metric END)")
+    print("="*60)
     print(pd.read_sql("""
         SELECT
-            City, Month, Season,
-            avg_aqi,
-            LAG(avg_aqi) OVER (
-                PARTITION BY City ORDER BY Month
-            )                                          AS prev_month_aqi,
-            ROUND(avg_aqi - LAG(avg_aqi) OVER (
-                PARTITION BY City ORDER BY Month
-            ), 1)                                      AS mom_change
+            City,
+            ROUND(AVG(CASE WHEN Season='Winter'       THEN avg_aqi END),1) AS Winter,
+            ROUND(AVG(CASE WHEN Season='Spring'       THEN avg_aqi END),1) AS Spring,
+            ROUND(AVG(CASE WHEN Season='Monsoon'      THEN avg_aqi END),1) AS Monsoon,
+            ROUND(AVG(CASE WHEN Season='Post-Monsoon' THEN avg_aqi END),1) AS Post_Monsoon
         FROM  monthly_aqi
-        WHERE City = 'Delhi'
-        ORDER BY Month
+        GROUP BY City
+        ORDER BY Winter DESC
     """, conn).to_string(index=False))
-    # Interview tip: LEAD() does the same but looks FORWARD (next row)
-    # "Find months where AQI jumped more than 20 points" = ABS(mom_change) > 20
+    # Read: Delhi Winter=185 is worst. Bengaluru stays flat all year (our city!)
+    # Interview: "Pivot a table without using PIVOT keyword" — this is the answer
 
-    # ── Query 2: Rolling 3-month avg (from pandas transform in Day 3) ─────────
-    print("\n" + "="*58)
-    print("  ROLLING 3-MONTH AVERAGE — BENGALURU")
-    print("  (computed in pandas during transform step)")
-    print("="*58)
+    # ── Query 2: NTILE — divide into quartiles ────────────────────────────────
+    # NTILE(4) splits rows into 4 equal buckets (quartiles)
+    # Q1=cleanest, Q4=most polluted
+    # Real use: tiering customers, SLA buckets, performance bands
+    print("\n" + "="*60)
+    print("  NTILE — POLLUTION QUARTILE BUCKETS")
+    print("  Q1=cleanest  Q4=most polluted")
+    print("="*60)
     print(pd.read_sql("""
-        SELECT Month, Season, avg_aqi, rolling_3m_aqi
-        FROM   monthly_aqi
-        WHERE  City = 'Bengaluru'
-        ORDER  BY Month
-    """, conn).to_string(index=False))
-    # Rolling avg smooths out spikes — used in time-series monitoring
-
-    # ── Query 3: CTE — multi-step SQL in one query ────────────────────────────
-    # CTE = WITH clause. Break complex queries into named steps.
-    # Mainframe parallel: COBOL working storage variables for intermediate calc
-    print("\n" + "="*58)
-    print("  CTE — CITIES VS NATIONAL AVERAGE")
-    print("  Pattern: WITH step1 AS (...), step2 AS (...) SELECT ...")
-    print("="*58)
-    print(pd.read_sql("""
-        WITH national AS (
-            -- Step 1: compute national average (one number)
-            SELECT ROUND(AVG(annual_avg_aqi), 1) AS nat_avg
-            FROM   city_annual
-        ),
-        ranked AS (
-            -- Step 2: rank all cities
-            SELECT City, annual_avg_aqi, total_poor_days,
-                   RANK() OVER (ORDER BY annual_avg_aqi DESC) AS rank
-            FROM   city_annual
-        )
-        -- Step 3: join both, add label
         SELECT
-            r.City,
-            r.rank,
-            r.annual_avg_aqi,
-            n.nat_avg,
-            CASE
-                WHEN r.annual_avg_aqi > n.nat_avg THEN 'Above Avg ⚠'
-                ELSE                                   'Below Avg ✓'
-            END AS vs_national
-        FROM ranked r, national n
-        ORDER BY r.rank
+            City,
+            annual_avg_aqi,
+            NTILE(4) OVER (ORDER BY annual_avg_aqi)  AS quartile,
+            CASE NTILE(4) OVER (ORDER BY annual_avg_aqi)
+                WHEN 1 THEN 'Clean'
+                WHEN 2 THEN 'Moderate'
+                WHEN 3 THEN 'Polluted'
+                WHEN 4 THEN 'Severe'
+            END AS tier
+        FROM city_annual
+        ORDER BY annual_avg_aqi
     """, conn).to_string(index=False))
 
-    # ── Query 4: Data Quality Report ──────────────────────────────────────────
-    # Every production pipeline MUST have a DQ check after load
-    # In mainframe: your reconciliation reports after batch run
-    print("\n" + "="*58)
-    print("  DATA QUALITY REPORT")
-    print("="*58)
-    total       = len(raw_df)
-    nulls_after = int(raw_df['AQI'].isna().sum())
-    negatives   = int((raw_df['AQI'].dropna() < 0).sum())
-    dq_score    = round((1 - nulls_after / total) * 100, 1)
+    # ── Query 3: SELF JOIN — compare every city to Delhi as baseline ──────────
+    # JOIN a table to ITSELF using two aliases (a and b)
+    # Use case: compare every row against a reference row (benchmark)
+    # Mainframe parallel: reading same VSAM file twice with diff keys
+    print("\n" + "="*60)
+    print("  SELF JOIN — EVERY CITY vs DELHI BASELINE")
+    print("  Pattern: FROM table a JOIN table b ON b.City='Delhi'")
+    print("="*60)
+    print(pd.read_sql("""
+        SELECT
+            a.City,
+            a.annual_avg_aqi                                          AS city_aqi,
+            b.annual_avg_aqi                                          AS delhi_aqi,
+            ROUND(((a.annual_avg_aqi - b.annual_avg_aqi)
+                    / b.annual_avg_aqi) * 100, 1)                     AS pct_vs_delhi
+        FROM  city_annual a
+        JOIN  city_annual b ON b.City = 'Delhi'
+        WHERE a.City != 'Delhi'
+        ORDER BY pct_vs_delhi
+    """, conn).to_string(index=False))
+    # Bengaluru = -59.6% vs Delhi — you breathe air 60% cleaner than Delhi!
 
-    dq = pd.DataFrame([
-        {'Check': 'Total rows',         'Value': total,        'Status': 'OK'},
-        {'Check': 'Nulls before fix',   'Value': nulls_before, 'Status': 'FIXED'},
-        {'Check': 'Nulls after fix',    'Value': nulls_after,  'Status': 'OK' if nulls_after == 0 else 'WARN'},
-        {'Check': 'Negative AQI rows',  'Value': negatives,    'Status': 'OK' if negatives == 0 else 'FAIL'},
-        {'Check': 'Duplicate rows',     'Value': dupes_before, 'Status': 'OK' if dupes_before == 0 else 'FAIL'},
-        {'Check': 'DQ score (%)',       'Value': dq_score,     'Status': 'PASS' if dq_score == 100 else 'WARN'},
-    ])
-    print(dq.to_string(index=False))
+    # ── Feature 4: pandas .merge() — Python-side JOIN ─────────────────────────
+    # merge() is SQL JOIN done in pandas — same logic, different syntax
+    # how='left'  = LEFT JOIN  (keep all rows from left df)
+    # how='inner' = INNER JOIN (only matching rows)
+    # how='outer' = FULL OUTER JOIN
+    print("\n" + "="*60)
+    print("  pandas MERGE — monthly + annual  (LEFT JOIN in Python)")
+    print("  Shows months where Bengaluru was ABOVE its own annual avg")
+    print("="*60)
+    monthly_df = pd.read_sql("SELECT City, Month, Season, avg_aqi FROM monthly_aqi", conn)
+    annual_df  = pd.read_sql("SELECT City, annual_avg_aqi FROM city_annual", conn)
 
-    # ── Output 5: Pipeline run report → JSON ──────────────────────────────────
-    # This JSON = your pipeline's "batch completion report"
-    # Equivalent to your JES2 job completion message in mainframe
-    top3 = pd.read_sql("""
-        SELECT City, annual_avg_aqi
-        FROM   city_annual
-        ORDER  BY annual_avg_aqi DESC LIMIT 3
-    """, conn).to_dict(orient='records')
+    merged = monthly_df.merge(annual_df, on='City', how='left')
+    merged['above_annual'] = (merged['avg_aqi'] > merged['annual_avg_aqi'])
 
+    blr = merged[merged['City'] == 'Bengaluru'].copy()
+    blr['status'] = blr['above_annual'].map({True: 'Above ↑', False: 'Below ↓'})
+    print(blr[['City','Month','Season','avg_aqi','annual_avg_aqi','status']]
+            .to_string(index=False))
+
+    # ── Feature 5: Multi-format export ───────────────────────────────────────
+    # CSV   = universal, human-readable, every tool reads it
+    # JSON  = APIs, web dashboards, microservices
+    # Parquet = columnar, compressed, used in BigQuery/Spark/data lakes
+    #           You WILL use Parquet from Week 4 onwards
+    print("\n" + "="*60)
+    print("  MULTI-FORMAT EXPORT")
+    print("="*60)
+    summary = pd.read_sql("SELECT * FROM city_annual", conn)
+
+    summary.to_csv('city_annual.csv', index=False)
+    print("CSV     → city_annual.csv      ✓  (Excel/Sheets readable)")
+
+    summary.to_json('city_annual.json', orient='records', indent=2)
+    print("JSON    → city_annual.json     ✓  (API/dashboard ready)")
+
+    # Parquet — install once: pip install pyarrow
+    try:
+        summary.to_parquet('city_annual.parquet', index=False)
+        print("Parquet → city_annual.parquet  ✓  (BigQuery/Spark native)")
+    except ImportError:
+        print("Parquet → run: pip install pyarrow  (needed from Week 4)")
+
+    # ── Feature 6: pandas pivot_table — same as SQL PIVOT, pure Python ────────
+    print("\n" + "="*60)
+    print("  pandas pivot_table — AQI HEATMAP BY CITY + SEASON")
+    print("="*60)
+    monthly_full = pd.read_sql("SELECT City, Season, avg_aqi FROM monthly_aqi", conn)
+    pivot = monthly_full.pivot_table(
+        index='City', columns='Season', values='avg_aqi',
+        aggfunc='mean'
+    ).round(1)
+    print(pivot.to_string())
+    # This is the Python equivalent of your SQL CASE WHEN pivot above
+    # pivot_table() is used to prep data for charts and dashboards
+
+    # ── Feature 7: Final pipeline report update ───────────────────────────────
     report = {
-        "pipeline":    "india-aqi-etl",
-        "run_date":    datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "status":      "SUCCESS",
-        "stats": {
-            "total_rows":       total,
-            "cities":           int(raw_df['City'].nunique()),
-            "date_range":       f"{raw_df['Date'].min()} → {raw_df['Date'].max()}",
-            "nulls_fixed":      nulls_before,
-            "dq_score_pct":     dq_score,
-        },
-        "top3_polluted": top3,
+        "pipeline":  "india-aqi-etl",
+        "day":       4,
+        "run_date":  datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "status":    "SUCCESS",
+        "new_skills": ["PIVOT (CASE WHEN)", "NTILE", "Self JOIN",
+                       "pandas merge", "multi-format export",
+                       "pivot_table"],
+        "exports":   ["city_annual.csv", "city_annual.json",
+                      "city_annual.parquet (if pyarrow installed)"],
+        "days_completed": 4,
+        "week1_progress": "4/5 days done"
     }
-
     with open('pipeline_report.json', 'w') as f:
         json.dump(report, f, indent=2)
-
-    print("\n" + "="*58)
-    print("  PIPELINE RUN REPORT  →  pipeline_report.json")
-    print("="*58)
+    print("\n" + "="*60)
+    print("  PIPELINE REPORT updated → pipeline_report.json")
+    print("="*60)
     print(json.dumps(report, indent=2))
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     t0 = datetime.now()
-    logging.info("India AQI ETL Pipeline — Day 3")
+    logging.info("India AQI ETL Pipeline — Day 4")
 
     raw_df, nulls_before, dupes_before = extract('city_day.csv')
     raw_df, monthly_df                 = transform(raw_df)
     load(raw_df, monthly_df, 'air_quality.db')
 
     conn = sqlite3.connect('air_quality.db')
-    verify_day1(conn)
-    verify_day2(conn)
-    verify_day3(conn, raw_df, nulls_before, dupes_before)
+    verify_days_1_to_3(conn)
+    verify_day4(conn, raw_df)
     conn.close()
 
     elapsed = (datetime.now() - t0).total_seconds()
     logging.info(f"Pipeline complete in {elapsed:.2f}s")
-    logging.info("New file: pipeline_report.json")
-    logging.info("Git: git add . && git commit -m 'feat: day3 LAG CTE DQ-report'")
+    logging.info("New files: city_annual.csv  city_annual.json  pipeline_report.json")
+    logging.info("Day 5 tomorrow: wrap everything into reusable functions + GitHub cleanup")

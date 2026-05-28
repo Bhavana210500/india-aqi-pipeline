@@ -1,26 +1,21 @@
 {
   "pipeline": "india-aqi-etl",
-  "run_date": "2026-05-27 06:59",
+  "day": 4,
+  "run_date": "2026-05-28 08:49",
   "status": "SUCCESS",
-  "stats": {
-    "total_rows": 3650,
-    "cities": 10,
-    "date_range": "2023-01-01 00:00:00 \u2192 2023-12-31 00:00:00",
-    "nulls_fixed": 188,
-    "dq_score_pct": 100.0
-  },
-  "top3_polluted": [
-    {
-      "City": "Delhi",
-      "annual_avg_aqi": 181.4
-    },
-    {
-      "City": "Lucknow",
-      "annual_avg_aqi": 158.4
-    },
-    {
-      "City": "Kolkata",
-      "annual_avg_aqi": 140.5
-    }
-  ]
+  "new_skills": [
+    "PIVOT (CASE WHEN)",
+    "NTILE",
+    "Self JOIN",
+    "pandas merge",
+    "multi-format export",
+    "pivot_table"
+  ],
+  "exports": [
+    "city_annual.csv",
+    "city_annual.json",
+    "city_annual.parquet (if pyarrow installed)"
+  ],
+  "days_completed": 4,
+  "week1_progress": "4/5 days done"
 }

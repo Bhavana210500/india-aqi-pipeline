@@ -1,0 +1,11 @@
+City,Year,annual_avg_aqi,total_poor_days
+Ahmedabad,2023,116.8,2
+Bengaluru,2023,73.2,0
+Chennai,2023,88.0,0
+Delhi,2023,181.4,133
+Hyderabad,2023,85.8,0
+Jaipur,2023,107.8,1
+Kolkata,2023,140.5,37
+Lucknow,2023,158.4,71
+Mumbai,2023,95.4,0
+Pune,2023,79.0,0
