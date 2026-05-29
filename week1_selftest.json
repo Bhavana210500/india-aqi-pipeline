@@ -1,0 +1,15 @@
+{
+  "date": "2026-05-29",
+  "score": "9/9",
+  "results": {
+    "1_basic_groupby": "PASS (10 rows)",
+    "2_rank_window": "PASS (10 rows)",
+    "3_row_number_partition": "PASS (10 rows)",
+    "4_lag_trend": "PASS (12 rows)",
+    "5_cte": "PASS (10 rows)",
+    "6_pivot_case_when": "PASS (10 rows)",
+    "7_ntile": "PASS (10 rows)",
+    "8_self_join": "PASS (9 rows)",
+    "9_seasonal_rank": "PASS (4 rows)"
+  }
+}
